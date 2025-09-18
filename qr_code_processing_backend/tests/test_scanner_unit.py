@@ -2,7 +2,8 @@ from typing import Any, Dict
 
 import httpx
 
-from src.api.main import QRScannerService, CONFIG
+# Import the module dynamically so CONFIG is referenced at runtime (supports monkeypatch)
+from src.api import main as api_main
 
 
 def test_send_to_external_includes_auth_and_payload(monkeypatch):
@@ -20,12 +21,12 @@ def test_send_to_external_includes_auth_and_payload(monkeypatch):
             return httpx.Response(status_code=200, json={"ok": True})
 
     client = FakeClient()
-    resp = QRScannerService._send_to_external(client, "HELLO-QR")  # type: ignore[arg-type]
+    resp = api_main.QRScannerService._send_to_external(client, "HELLO-QR")  # type: ignore[arg-type]
     assert resp.status_code == 200
-    assert sent["url"] == str(CONFIG.external_api_url)
+    assert sent["url"] == str(api_main.CONFIG.external_api_url)
     assert sent["json"] == {"qr_data": "HELLO-QR"}
     assert "Authorization" in sent["headers"]
-    assert sent["headers"]["Authorization"] == f"Bearer {CONFIG.external_api_key}"
+    assert sent["headers"]["Authorization"] == f"Bearer {api_main.CONFIG.external_api_key}"
 
 
 def test_forward_to_webhook_sends_summary(monkeypatch):
@@ -45,9 +46,9 @@ def test_forward_to_webhook_sends_summary(monkeypatch):
             return httpx.Response(status_code=202, json={"webhook": "accepted"})
 
     client = FakeClient()
-    wh_resp = QRScannerService._forward_to_webhook(client, external_resp)  # type: ignore[arg-type]
+    wh_resp = api_main.QRScannerService._forward_to_webhook(client, external_resp)  # type: ignore[arg-type]
     assert wh_resp.status_code == 202
-    assert captured["url"] == str(CONFIG.webhook_url)
+    assert captured["url"] == str(api_main.CONFIG.webhook_url)
 
     payload = captured["json"]
     assert payload["source"] == "qr-code-processing-backend"
