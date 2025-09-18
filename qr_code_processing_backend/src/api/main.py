@@ -159,6 +159,19 @@ class ProcessVideoURLRequest(BaseModel):
     max_frames: Optional[int] = Field(default=1500, ge=1, description="Maximum number of frames to scan before stopping.")
     frame_stride: Optional[int] = Field(default=5, ge=1, description="Analyze every Nth frame to reduce processing cost.")
     stop_after_first: Optional[bool] = Field(default=True, description="If true, stop after detecting the first QR code.")
+    # New preprocessing options (all optional; defaults preserve prior behavior)
+    grayscale: Optional[bool] = Field(
+        default=False,
+        description="If true, convert frames to grayscale before detection.",
+    )
+    adaptive_threshold: Optional[bool] = Field(
+        default=False,
+        description="If true, apply adaptive thresholding (after grayscale) to increase contrast.",
+    )
+    denoise: Optional[bool] = Field(
+        default=False,
+        description="If true, apply light denoising (Gaussian blur) before detection.",
+    )
 
 
 class ProcessVideoURLResponse(BaseModel):
@@ -301,9 +314,22 @@ class QRScannerService:
 SCANNER = QRScannerService()
 
 
-def _detect_qr_from_video_file(path: str, max_frames: int = 1500, frame_stride: int = 5, stop_after_first: bool = True) -> Dict[str, Any]:
+def _detect_qr_from_video_file(
+    path: str,
+    max_frames: int = 1500,
+    frame_stride: int = 5,
+    stop_after_first: bool = True,
+    grayscale: bool = False,
+    adaptive_threshold: bool = False,
+    denoise: bool = False,
+) -> Dict[str, Any]:
     """
     Internal helper to iterate frames from a video file and collect decoded QR codes.
+
+    Preprocessing (optional, all default False to preserve prior behavior):
+    - grayscale: convert frame to grayscale
+    - adaptive_threshold: apply adaptive thresholding (after grayscale)
+    - denoise: apply light Gaussian blur (3x3)
 
     Returns a dict with:
     - detected: List[str] of unique decoded values
@@ -331,7 +357,28 @@ def _detect_qr_from_video_file(path: str, max_frames: int = 1500, frame_stride: 
             frames_scanned += 1
             frame_idx += 1
 
-            data, points, _ = detector.detectAndDecode(frame)
+            # Apply simple, optional preprocessing
+            processed = frame
+            if grayscale:
+                processed = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+            if denoise:
+                # small Gaussian blur to reduce noise; works with gray or color images
+                processed = cv2.GaussianBlur(processed, (3, 3), 0)
+            if adaptive_threshold:
+                # ensure grayscale before threshold
+                if len(processed.shape) == 3:
+                    processed = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+                processed = cv2.adaptiveThreshold(
+                    processed,
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    11,
+                    2,
+                )
+
+            # Detect and decode (supports gray or color image)
+            data, points, _ = detector.detectAndDecode(processed)
             if data:
                 if data not in detected:
                     detected.append(data)
@@ -607,6 +654,9 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
                 max_frames=req.max_frames or 1500,
                 frame_stride=req.frame_stride or 5,
                 stop_after_first=req.stop_after_first if req.stop_after_first is not None else True,
+                grayscale=bool(req.grayscale) if req.grayscale is not None else False,
+                adaptive_threshold=bool(req.adaptive_threshold) if req.adaptive_threshold is not None else False,
+                denoise=bool(req.denoise) if req.denoise is not None else False,
             )
             detected: List[str] = result["detected"]
             frames_scanned: int = result["frames_scanned"]

@@ -75,10 +75,20 @@ See `.env.example`:
       "url": "https://example.com/video.mp4",
       "max_frames": 1500,
       "frame_stride": 5,
-      "stop_after_first": true
+      "stop_after_first": true,
+      "grayscale": false,
+      "adaptive_threshold": false,
+      "denoise": false
     }
   - returns: { "message": "...", "detected": ["QR1", "QR2"], "frames_scanned": 123 }
-  - notes: The server must be able to access the URL directly (no auth). Large videos are sampled by frame_stride.
+  - notes:
+    - The server must be able to access the URL directly (no auth).
+    - Large videos are sampled by frame_stride.
+    - Optional preprocessing flags can help in noisy/low-contrast videos:
+      - grayscale: convert to grayscale before detection
+      - adaptive_threshold: increase contrast via adaptive thresholding (applies after grayscale)
+      - denoise: light Gaussian blur to reduce noise
+    - All preprocessing options default to false to preserve previous behavior.
 
 ### Processing Pipeline
 
