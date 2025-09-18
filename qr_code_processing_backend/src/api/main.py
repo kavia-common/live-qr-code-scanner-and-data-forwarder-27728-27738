@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import cv2  # type: ignore
 import httpx
@@ -148,6 +148,21 @@ class ProcessYouTubeRequest(BaseModel):
 
 class ProcessYouTubeResponse(BaseModel):
     """Response containing any decoded QR payloads found in the YouTube video."""
+    message: str = Field(..., description="Summary message.")
+    detected: List[str] = Field(default_factory=list, description="List of unique decoded QR strings detected.")
+    frames_scanned: int = Field(..., description="Number of frames scanned.")
+
+
+class ProcessVideoURLRequest(BaseModel):
+    """Request body for processing QR codes from a direct video file URL."""
+    url: HttpUrl = Field(..., description="Direct URL to a video file (e.g., .mp4) to analyze for QR codes.")
+    max_frames: Optional[int] = Field(default=1500, ge=1, description="Maximum number of frames to scan before stopping.")
+    frame_stride: Optional[int] = Field(default=5, ge=1, description="Analyze every Nth frame to reduce processing cost.")
+    stop_after_first: Optional[bool] = Field(default=True, description="If true, stop after detecting the first QR code.")
+
+
+class ProcessVideoURLResponse(BaseModel):
+    """Response containing any decoded QR payloads found in the provided video URL."""
     message: str = Field(..., description="Summary message.")
     detected: List[str] = Field(default_factory=list, description="List of unique decoded QR strings detected.")
     frames_scanned: int = Field(..., description="Number of frames scanned.")
@@ -326,6 +341,41 @@ def _detect_qr_from_video_file(path: str, max_frames: int = 1500, frame_stride: 
         cap.release()
 
     return {"detected": detected, "frames_scanned": frames_scanned}
+
+
+def _download_video_to_temp(url: str) -> Tuple[str, tempfile.TemporaryDirectory]:
+    """
+    Download/stream a remote video to a temporary file using httpx streaming.
+
+    Returns:
+    - (file_path, tempdir_object) where tempdir_object should be kept alive
+      until after the caller is done using the file. The caller is responsible
+      for cleaning up (context manager recommended).
+
+    Raises:
+    - RuntimeError if the download fails or content-type/length is suspicious.
+    """
+    # Create a temp directory the caller will manage
+    tmpdir_ctx = tempfile.TemporaryDirectory()
+    tmpdir = tmpdir_ctx.name
+    target_path = _os.path.join(tmpdir, "remote_video.mp4")
+
+    # Stream download with chunking to avoid loading whole file into memory
+    try:
+        with httpx.stream("GET", url, timeout=30.0, follow_redirects=True) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code} while downloading video")
+            # Not strictly required to be 'video/*', keep permissive
+            with open(target_path, "wb") as f:
+                for chunk in resp.iter_bytes():
+                    if chunk:
+                        f.write(chunk)
+    except Exception as exc:
+        # Clean up and re-raise with context
+        tmpdir_ctx.cleanup()
+        raise RuntimeError(f"Failed to fetch video from URL: {exc}") from exc
+
+    return target_path, tmpdir_ctx
 
 # -----------------------
 # Routes
@@ -520,6 +570,58 @@ def process_youtube_video(req: ProcessYouTubeRequest) -> ProcessYouTubeResponse:
     except Exception as exc:
         # Provide a clear error context
         raise HTTPException(status_code=500, detail=f"Failed to process YouTube video: {exc}") from exc
+
+
+# PUBLIC_INTERFACE
+@app.post(
+    "/process_video",
+    tags=["demo"],
+    summary="Process QR codes from a direct video file URL",
+    description=(
+        "Accepts a direct video file URL (e.g., mp4), downloads/streams it to a temporary file, "
+        "extracts frames with OpenCV, detects QR codes, and returns any decoded data found.\n\n"
+        "Notes: Large/long videos will be sampled by frame_stride; processing is CPU intensive. "
+        "Ensure the URL is directly accessible by the server and does not require authentication."
+    ),
+    response_model=ProcessVideoURLResponse,
+)
+def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
+    """
+    Download or stream a direct video file URL and scan frames for QR codes.
+
+    Parameters:
+    - url: Direct URL to a video file (e.g., .mp4)
+    - max_frames: Max frames to scan (safety bound)
+    - frame_stride: Analyze every Nth frame
+    - stop_after_first: Stop when first QR is found
+
+    Returns:
+    - Message and a list of unique decoded QR strings along with frames scanned.
+    """
+    # Download to temp file using httpx
+    try:
+        path, tmpctx = _download_video_to_temp(str(req.url))
+        try:
+            result = _detect_qr_from_video_file(
+                path,
+                max_frames=req.max_frames or 1500,
+                frame_stride=req.frame_stride or 5,
+                stop_after_first=req.stop_after_first if req.stop_after_first is not None else True,
+            )
+            detected: List[str] = result["detected"]
+            frames_scanned: int = result["frames_scanned"]
+            return ProcessVideoURLResponse(
+                message="Scan complete" if detected else "No QR codes detected",
+                detected=detected,
+                frames_scanned=frames_scanned,
+            )
+        finally:
+            # Ensure temp files cleaned
+            tmpctx.cleanup()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to process video URL: {exc}") from exc
 
 # PUBLIC_INTERFACE
 @app.get(

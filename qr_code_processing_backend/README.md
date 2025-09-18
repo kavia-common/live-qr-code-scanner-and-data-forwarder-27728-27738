@@ -69,6 +69,16 @@ See `.env.example`:
       "stop_after_first": true
     }
   - returns: { "message": "...", "detected": ["QR1", "QR2"], "frames_scanned": 123 }
+- POST `/process_video` — Process QR codes from a direct video file URL (e.g., mp4)
+  - body:
+    {
+      "url": "https://example.com/video.mp4",
+      "max_frames": 1500,
+      "frame_stride": 5,
+      "stop_after_first": true
+    }
+  - returns: { "message": "...", "detected": ["QR1", "QR2"], "frames_scanned": 123 }
+  - notes: The server must be able to access the URL directly (no auth). Large videos are sampled by frame_stride.
 
 ### Processing Pipeline
 
