@@ -84,6 +84,7 @@ See `.env.example`:
   - notes:
     - The server must be able to access the URL directly (no auth).
     - Large videos are sampled by frame_stride.
+    - Dropbox convenience: If you provide a Dropbox share link (e.g. dl=0), the server will rewrite it to force a direct download (dl=1) so OpenCV can read the bytes.
     - Optional preprocessing flags can help in noisy/low-contrast videos:
       - grayscale: convert to grayscale before detection
       - adaptive_threshold: increase contrast via adaptive thresholding (applies after grayscale)

@@ -390,9 +390,47 @@ def _detect_qr_from_video_file(
     return {"detected": detected, "frames_scanned": frames_scanned}
 
 
+def _rewrite_dropbox_url_if_needed(url: str) -> str:
+    """
+    Normalize Dropbox share URLs to a direct-download form so OpenCV/httpx can fetch bytes.
+
+    Dropbox share links often look like:
+      - https://www.dropbox.com/s/<id>/<name>.mp4?dl=0
+      - https://www.dropbox.com/scl/fi/<id>/<name>.mp4?rlkey=...&dl=0
+
+    For direct download, Dropbox supports:
+      - Setting dl=1 on the same host, or
+      - Using dl.dropboxusercontent.com with the same path and query (no 'dl' needed).
+
+    We prefer keeping the original host but force dl=1. If 'dl' param is present,
+    we set it to 1; if not present, we add dl=1. If the host is 'www.dropbox.com'
+    or 'dropbox.com', this rewrite is applied. All other URLs are returned unchanged.
+    """
+    try:
+        from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        if host.endswith("dropbox.com"):
+            # Force dl=1 on Dropbox share links
+            q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            q["dl"] = "1"
+            new_query = urlencode(q, doseq=True)
+            rewritten = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            return rewritten
+        return url
+    except Exception:
+        # Safe fallback: return the original URL if parsing fails
+        return url
+
+
 def _download_video_to_temp(url: str) -> Tuple[str, tempfile.TemporaryDirectory]:
     """
     Download/stream a remote video to a temporary file using httpx streaming.
+
+    Convenience: If the URL is a Dropbox share link (dropbox.com), it is automatically
+    rewritten to force a direct download (dl=1). This helps avoid HTML landing pages
+    that cannot be opened by OpenCV.
 
     Returns:
     - (file_path, tempdir_object) where tempdir_object should be kept alive
@@ -402,6 +440,9 @@ def _download_video_to_temp(url: str) -> Tuple[str, tempfile.TemporaryDirectory]
     Raises:
     - RuntimeError if the download fails or content-type/length is suspicious.
     """
+    # Possibly rewrite Dropbox share links to force direct download
+    url = _rewrite_dropbox_url_if_needed(url)
+
     # Create a temp directory the caller will manage
     tmpdir_ctx = tempfile.TemporaryDirectory()
     tmpdir = tmpdir_ctx.name
@@ -628,7 +669,9 @@ def process_youtube_video(req: ProcessYouTubeRequest) -> ProcessYouTubeResponse:
         "Accepts a direct video file URL (e.g., mp4), downloads/streams it to a temporary file, "
         "extracts frames with OpenCV, detects QR codes, and returns any decoded data found.\n\n"
         "Notes: Large/long videos will be sampled by frame_stride; processing is CPU intensive. "
-        "Ensure the URL is directly accessible by the server and does not require authentication."
+        "Ensure the URL is directly accessible by the server and does not require authentication.\n\n"
+        "Convenience: If you provide a Dropbox share link (dropbox.com with dl=0 or missing), the service "
+        "automatically rewrites it to force a direct download (dl=1) so OpenCV can read the video."
     ),
     response_model=ProcessVideoURLResponse,
 )
