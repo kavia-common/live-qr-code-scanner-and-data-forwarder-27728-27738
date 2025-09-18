@@ -20,6 +20,7 @@ Theme: Ocean Professional (blue & amber accents, modern, clean, minimalist)
 - Python 3.10+
 - A local webcam (or virtual camera device)
 - Internet access for calling external API and webhook (default: httpbin.org)
+- For pyzbar decoder (optional): system library libzbar must be installed (e.g., Debian/Ubuntu: `sudo apt-get update && sudo apt-get install -y libzbar0`)
 
 ## Setup
 
@@ -78,7 +79,9 @@ See `.env.example`:
       "stop_after_first": true,
       "grayscale": false,
       "adaptive_threshold": false,
-      "denoise": false
+      "denoise": false,
+      "decoder_backend": "auto",
+      "use_pyzbar_fallback": true
     }
   - returns: { "message": "...", "detected": ["QR1", "QR2"], "frames_scanned": 123 }
   - notes:
@@ -89,6 +92,9 @@ See `.env.example`:
       - grayscale: convert to grayscale before detection
       - adaptive_threshold: increase contrast via adaptive thresholding (applies after grayscale)
       - denoise: light Gaussian blur to reduce noise
+    - Decoder selection:
+      - decoder_backend: "opencv" | "pyzbar" | "auto" (default "auto"). "auto" tries OpenCV first, then pyzbar if enabled.
+      - use_pyzbar_fallback: when true and backend is "auto", attempt pyzbar if OpenCV returns nothing.
     - All preprocessing options default to false to preserve previous behavior.
 
 ### Processing Pipeline

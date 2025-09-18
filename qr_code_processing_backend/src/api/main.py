@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Literal
 
 import cv2  # type: ignore
 import httpx
@@ -12,6 +12,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
+try:
+    # Optional dependency; only required if pyzbar selected or as fallback
+    from pyzbar.pyzbar import decode as pyzbar_decode  # type: ignore
+    _PYZBAR_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _PYZBAR_AVAILABLE = False
 
 # Load environment variables from .env if present
 load_dotenv()
@@ -172,6 +178,15 @@ class ProcessVideoURLRequest(BaseModel):
         default=False,
         description="If true, apply light denoising (Gaussian blur) before detection.",
     )
+    # Decoder controls
+    decoder_backend: Optional[Literal["opencv", "pyzbar", "auto"]] = Field(
+        default="auto",
+        description="Select QR decoder backend. 'opencv' uses OpenCV only, 'pyzbar' uses pyzbar (requires system libzbar), 'auto' tries OpenCV then pyzbar."
+    )
+    use_pyzbar_fallback: Optional[bool] = Field(
+        default=True,
+        description="If true and decoder_backend is 'auto', use pyzbar as a fallback when OpenCV fails to decode."
+    )
 
 
 class ProcessVideoURLResponse(BaseModel):
@@ -243,8 +258,8 @@ class QRScannerService:
                     time.sleep(0.1)
                     continue
 
-                # Detect and decode
-                data, points, _ = detector.detectAndDecode(frame)
+                # Detect and decode with OpenCV (live scanner uses OpenCV path)
+                data, _points, _ = detector.detectAndDecode(frame)
                 if data:
                     # Optionally skip duplicates
                     with self._lock:
@@ -322,6 +337,8 @@ def _detect_qr_from_video_file(
     grayscale: bool = False,
     adaptive_threshold: bool = False,
     denoise: bool = False,
+    decoder_backend: str = "auto",
+    use_pyzbar_fallback: bool = True,
 ) -> Dict[str, Any]:
     """
     Internal helper to iterate frames from a video file and collect decoded QR codes.
@@ -341,7 +358,35 @@ def _detect_qr_from_video_file(
     if not cap.isOpened():
         raise RuntimeError("Unable to open downloaded/streamed video with OpenCV")
 
-    detector = cv2.QRCodeDetector()
+    # Instantiate detector once for efficiency
+    opencv_detector = cv2.QRCodeDetector()
+
+    # Local helper: OpenCV decode
+    def _decode_with_opencv(img) -> Optional[str]:
+        try:
+            data, _pts, _ = opencv_detector.detectAndDecode(img)
+            if data:
+                return data
+            return None
+        except Exception:
+            return None
+
+    # Local helper: pyzbar decode
+    def _decode_with_pyzbar(img) -> Optional[str]:
+        if not _PYZBAR_AVAILABLE:
+            return None
+        try:
+            results = pyzbar_decode(img)  # type: ignore[name-defined]
+            for r in results:
+                try:
+                    s = r.data.decode("utf-8", errors="ignore")
+                except Exception:
+                    s = str(r.data)
+                if s:
+                    return s
+            return None
+        except Exception:
+            return None
 
     try:
         frame_idx = 0
@@ -377,11 +422,22 @@ def _detect_qr_from_video_file(
                     2,
                 )
 
-            # Detect and decode (supports gray or color image)
-            data, points, _ = detector.detectAndDecode(processed)
-            if data:
-                if data not in detected:
-                    detected.append(data)
+            # Detect and decode using selected backend(s)
+            decoded_value: Optional[str] = None
+            backend_choice = (decoder_backend or "auto").lower()
+            if backend_choice == "opencv":
+                decoded_value = _decode_with_opencv(processed)
+            elif backend_choice == "pyzbar":
+                decoded_value = _decode_with_pyzbar(processed)
+            else:
+                # auto: try OpenCV first, then optional pyzbar fallback
+                decoded_value = _decode_with_opencv(processed)
+                if not decoded_value and use_pyzbar_fallback:
+                    decoded_value = _decode_with_pyzbar(processed)
+
+            if decoded_value:
+                if decoded_value not in detected:
+                    detected.append(decoded_value)
                 if stop_after_first:
                     break
     finally:
@@ -700,6 +756,8 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
                 grayscale=bool(req.grayscale) if req.grayscale is not None else False,
                 adaptive_threshold=bool(req.adaptive_threshold) if req.adaptive_threshold is not None else False,
                 denoise=bool(req.denoise) if req.denoise is not None else False,
+                decoder_backend=(req.decoder_backend or "auto"),
+                use_pyzbar_fallback=bool(req.use_pyzbar_fallback) if req.use_pyzbar_fallback is not None else True,
             )
             detected: List[str] = result["detected"]
             frames_scanned: int = result["frames_scanned"]
