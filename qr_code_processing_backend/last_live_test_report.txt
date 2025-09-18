@@ -1,12 +1,13 @@
 Request:
 POST https://vscode-internal-24781-beta.beta01.cloud.kavia.ai:3001/process_youtube
-Body: {"url": "https://www.youtube.com/shorts/pUQsYy6IdZk"}
+Body: {"url": "https://www.dropbox.com/scl/fi/kc29p81u69pouhsdkr6d4/2023-Conference-Trade-Show-Interview-Series-Part-2.mp4?rlkey=qzevjngye7q4g15mhw9uwh0lm&dl=0"}
 
 Response:
 Status: 500
-Body: {"detail":"Failed to process YouTube video: HTTP Error 400: Bad Request"}
+Body: {"detail":"Failed to process YouTube video: kc29p81u69p is unavailable"}
 
 Interpretation:
-- The backend returned HTTP 500 with detail indicating an underlying HTTP 400 error while attempting to process the YouTube URL.
-- This suggests the YouTube retrieval via pytube failed (e.g., Shorts format restrictions, regional/network restrictions, or pytube encountering a transient/format-specific error).
-- As a result, QR code detection did not proceed. No QR codes were detected from this attempt.
+- Endpoint /process_youtube is available (no /process_video found in OpenAPI).
+- The backend attempted to process the provided URL but failed before QR scanning.
+- The error indicates the source resource (Dropbox link or its underlying identifier) is unavailable for direct retrieval by the server.
+- No QR codes were detected because the video could not be retrieved or opened.
