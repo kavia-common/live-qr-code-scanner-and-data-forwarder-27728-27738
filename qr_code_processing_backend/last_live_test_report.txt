@@ -1,13 +1,13 @@
 Request:
-POST https://vscode-internal-24781-beta.beta01.cloud.kavia.ai:3001/process_youtube
-Body: {"url": "https://www.dropbox.com/scl/fi/kc29p81u69pouhsdkr6d4/2023-Conference-Trade-Show-Interview-Series-Part-2.mp4?rlkey=qzevjngye7q4g15mhw9uwh0lm&dl=0"}
+POST https://vscode-internal-24781-beta.beta01.cloud.kavia.ai:3001/process_video
+Body: {"url": "https://www.dropbox.com/scl/fi/kc29p81u69pouhsdkr6d4/2023-Conference-Trade-Show-Interview-Series-Part-2.mp4?rlkey=qzevjngye7q4g15mhw9uwh0lm&dl=0", "frame_stride": 1, "max_frames": 500, "preprocess": {"grayscale": true, "adaptive_threshold": true, "denoise": true}}
 
 Response:
 Status: 500
-Body: {"detail":"Failed to process YouTube video: kc29p81u69p is unavailable"}
+Body: {"detail":"Failed to process video URL: Unable to open downloaded/streamed video with OpenCV"}
 
 Interpretation:
-- Endpoint /process_youtube is available (no /process_video found in OpenAPI).
-- The backend attempted to process the provided URL but failed before QR scanning.
-- The error indicates the source resource (Dropbox link or its underlying identifier) is unavailable for direct retrieval by the server.
-- No QR codes were detected because the video could not be retrieved or opened.
+- /process_video endpoint is reachable.
+- The video could not be opened by OpenCV after download/stream.
+- No QR codes were detected; frames scanned likely 0.
+- Root cause likely a non-direct/unsupported Dropbox URL or unsupported container format/sizing for cv2.VideoCapture.
