@@ -1,0 +1,12 @@
+Request:
+POST https://vscode-internal-24781-beta.beta01.cloud.kavia.ai:3001/process_youtube
+Body: {"url": "https://www.youtube.com/shorts/pUQsYy6IdZk"}
+
+Response:
+Status: 500
+Body: {"detail":"Failed to process YouTube video: HTTP Error 400: Bad Request"}
+
+Interpretation:
+- The backend returned HTTP 500 with detail indicating an underlying HTTP 400 error while attempting to process the YouTube URL.
+- This suggests the YouTube retrieval via pytube failed (e.g., Shorts format restrictions, regional/network restrictions, or pytube encountering a transient/format-specific error).
+- As a result, QR code detection did not proceed. No QR codes were detected from this attempt.
