@@ -206,13 +206,27 @@ class ProcessVideoURLRequest(BaseModel):
         default="auto",
         description="Select QR decoder backend. 'opencv' uses OpenCV only, 'pyzbar' uses pyzbar (requires system libzbar), 'zxing' uses ZXing-C++ (requires zxing-cpp binding), 'auto' tries OpenCV then ZXing (if enabled) then pyzbar."
     )
+    # New explicit backend flags exposed to the API request
+    use_opencv: Optional[bool] = Field(
+        default=True,
+        description="If true, allow OpenCV QRCodeDetector decoding. In 'auto' mode this is attempted first."
+    )
+    use_pyzbar: Optional[bool] = Field(
+        default=True,
+        description="If true, allow pyzbar decoding. In 'auto' mode this is attempted after others when enabled."
+    )
+    use_zxing: Optional[bool] = Field(
+        default=True,
+        description="If true, allow ZXing-C++ decoding. In 'auto' mode this is attempted after OpenCV when bindings are available."
+    )
+    # Backward-compatibility aliases (kept for now; will be mapped to the above)
     use_pyzbar_fallback: Optional[bool] = Field(
         default=True,
-        description="If true and decoder_backend is 'auto', attempt pyzbar if previous decoders return nothing."
+        description="Deprecated alias for use_pyzbar in 'auto' mode. Prefer 'use_pyzbar'."
     )
     use_zxingcpp: Optional[bool] = Field(
         default=True,
-        description="Enable ZXing-C++ decoding in 'auto' mode when bindings are available. Ignored if ZXing bindings are not installed."
+        description="Deprecated alias for use_zxing. Prefer 'use_zxing'."
     )
 
 
@@ -398,8 +412,9 @@ def _detect_qr_from_video_file(
     adaptive_threshold: bool = False,
     denoise: bool = False,
     decoder_backend: str = "auto",
-    use_pyzbar_fallback: bool = True,
-    use_zxingcpp: bool = True,
+    use_opencv: bool = True,
+    use_pyzbar: bool = True,
+    use_zxing: bool = True,
 ) -> Dict[str, Any]:
     """
     Internal helper to iterate frames from a video file and collect decoded QR codes.
@@ -412,6 +427,14 @@ def _detect_qr_from_video_file(
     Returns a dict with:
     - detected: List[str] of unique decoded values
     - frames_scanned: int
+
+    Decoder selection:
+    - decoder_backend:
+        - "opencv": force OpenCV only (must also have use_opencv=True to execute).
+        - "pyzbar": force pyzbar only (must also have use_pyzbar=True and pyzbar installed).
+        - "zxing": force ZXing-C++ only (must also have use_zxing=True and bindings installed).
+        - "auto": try enabled backends in order: OpenCV -> ZXing -> pyzbar.
+    - use_opencv/use_zxing/use_pyzbar: booleans to enable/disable each backend.
     """
     detected: List[str] = []
     frames_scanned = 0
@@ -458,7 +481,7 @@ def _detect_qr_from_video_file(
         - zxingcpp.read_barcode typically accepts a NumPy array (BGR or gray).
         - We return the 'text' of the first decoded symbol if available.
         """
-        if not use_zxingcpp:
+        if not use_zxing:
             return None
         return decode_zxing(img)
 
@@ -500,19 +523,19 @@ def _detect_qr_from_video_file(
             decoded_value: Optional[str] = None
             backend_choice = (decoder_backend or "auto").lower()
             if backend_choice == "opencv":
-                decoded_value = _decode_with_opencv(processed)
+                decoded_value = _decode_with_opencv(processed) if use_opencv else None
             elif backend_choice == "pyzbar":
-                decoded_value = _decode_with_pyzbar(processed)
+                decoded_value = _decode_with_pyzbar(processed) if use_pyzbar else None
             elif backend_choice == "zxing":
-                decoded_value = _decode_with_zxing(processed)
+                decoded_value = _decode_with_zxing(processed) if use_zxing else None
             else:
-                # auto: try OpenCV, then ZXing (if enabled and available), then optional pyzbar
-                decoded_value = _decode_with_opencv(processed)
-                if not decoded_value and use_zxingcpp:
+                # auto: try enabled backends in order: OpenCV -> ZXing -> pyzbar
+                decoded_value = _decode_with_opencv(processed) if use_opencv else None
+                if not decoded_value and use_zxing:
                     zx = _decode_with_zxing(processed)
                     if zx:
                         decoded_value = zx
-                if not decoded_value and use_pyzbar_fallback:
+                if not decoded_value and use_pyzbar:
                     decoded_value = _decode_with_pyzbar(processed)
 
             if decoded_value:
@@ -759,6 +782,11 @@ def process_youtube_video(req: ProcessYouTubeRequest) -> ProcessYouTubeResponse:
 
     Returns:
     - Message and a list of unique decoded QR strings along with frames scanned.
+
+    Decoder prerequisites:
+    - OpenCV: bundled via opencv-python wheel.
+    - pyzbar: requires system libzbar (e.g., Debian/Ubuntu: sudo apt-get install -y libzbar0).
+    - ZXing-C++: install Python bindings via `pip install zxing-cpp` (preferred) or `pip install zxing-cpp-python` when official wheels are unavailable. If bindings are not installed, ZXing is skipped automatically or can be disabled via use_zxing=false.
     """
     # Download the video to a temporary file using pytube
     try:
@@ -820,6 +848,20 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
     - max_frames: Max frames to scan (safety bound)
     - frame_stride: Analyze every Nth frame
     - stop_after_first: Stop when first QR is found
+    - preprocessing: grayscale | adaptive_threshold | denoise (all default false)
+    - decoder_backend: "opencv" | "pyzbar" | "zxing" | "auto" (default "auto")
+    - use_opencv, use_pyzbar, use_zxing: booleans to enable/disable each decoder. In "auto" mode the order is OpenCV -> ZXing -> pyzbar, filtered by enabled flags.
+
+    Usage examples:
+    - Force OpenCV only:
+      { "url": "...mp4", "decoder_backend": "opencv", "use_opencv": true, "use_pyzbar": false, "use_zxing": false }
+    - Auto with ZXing disabled:
+      { "url": "...mp4", "decoder_backend": "auto", "use_zxing": false }
+    - Prefer ZXing explicitly:
+      { "url": "...mp4", "decoder_backend": "zxing", "use_zxing": true }
+    - Back-compat aliases:
+      use_pyzbar_fallback (alias for use_pyzbar when decoder_backend='auto'),
+      use_zxingcpp (alias for use_zxing)
 
     Returns:
     - Message and a list of unique decoded QR strings along with frames scanned.
@@ -828,6 +870,18 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
     try:
         path, tmpctx = _download_video_to_temp(str(req.url))
         try:
+            # Backward-compatibility mapping:
+            # If explicit flags are absent but deprecated aliases provided, map them.
+            use_pyzbar_flag = (
+                bool(req.use_pyzbar) if req.use_pyzbar is not None
+                else (bool(req.use_pyzbar_fallback) if req.use_pyzbar_fallback is not None else True)
+            )
+            use_zxing_flag = (
+                bool(req.use_zxing) if req.use_zxing is not None
+                else (bool(req.use_zxingcpp) if getattr(req, "use_zxingcpp", None) is not None else True)
+            )
+            use_opencv_flag = bool(req.use_opencv) if req.use_opencv is not None else True
+
             result = _detect_qr_from_video_file(
                 path,
                 max_frames=req.max_frames or 1500,
@@ -837,8 +891,9 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
                 adaptive_threshold=bool(req.adaptive_threshold) if req.adaptive_threshold is not None else False,
                 denoise=bool(req.denoise) if req.denoise is not None else False,
                 decoder_backend=(req.decoder_backend or "auto"),
-                use_pyzbar_fallback=bool(req.use_pyzbar_fallback) if req.use_pyzbar_fallback is not None else True,
-                use_zxingcpp=bool(req.use_zxingcpp) if getattr(req, "use_zxingcpp", None) is not None else True,
+                use_opencv=use_opencv_flag,
+                use_pyzbar=use_pyzbar_flag,
+                use_zxing=use_zxing_flag,
             )
             detected: List[str] = result["detected"]
             frames_scanned: int = result["frames_scanned"]

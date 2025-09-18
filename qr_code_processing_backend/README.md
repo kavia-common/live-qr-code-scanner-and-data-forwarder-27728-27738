@@ -21,7 +21,7 @@ Theme: Ocean Professional (blue & amber accents, modern, clean, minimalist)
 - A local webcam (or virtual camera device)
 - Internet access for calling external API and webhook (default: httpbin.org)
 - For pyzbar decoder (optional): system library libzbar must be installed (e.g., Debian/Ubuntu: `sudo apt-get update && sudo apt-get install -y libzbar0`)
-- For ZXing-C++ decoder (optional): Python bindings for zxing-cpp must be installed. We prefer the official `zxing-cpp` package when wheels are available for your platform. If not available, try `zxing-cpp-python`. The code includes a helper `decode_zxing(image)` that safely no-ops when bindings are not present.
+- For ZXing-C++ decoder (optional): Python bindings for zxing-cpp must be installed. Prefer `pip install zxing-cpp` (official wheels). If not available for your platform, try `pip install zxing-cpp-python`. The API will skip ZXing if bindings are missing; set `"use_zxing": false` to explicitly disable it.
 
 ### ZXing-C++ installation notes
 
@@ -34,7 +34,7 @@ Theme: Ocean Professional (blue & amber accents, modern, clean, minimalist)
   - Some environments (e.g., ARM, Alpine/musl, older Python) may lack prebuilt wheels. The API gracefully skips ZXing if import fails.
   - No additional system libraries are typically required for zxing-cpp wheels. If building from source, consult the zxing-cpp project for prerequisites.
 
-Both ZXing-C++ bindings are optional at runtime. The API will silently skip ZXing if the module is not present.
+Both ZXing-C++ bindings are optional at runtime. The API will silently skip ZXing if the module is not present. You can also explicitly disable ZXing for a request via `"use_zxing": false` in `/process_video`.
 
 ## Setup
 
@@ -95,6 +95,11 @@ See `.env.example`:
       "adaptive_threshold": false,
       "denoise": false,
       "decoder_backend": "auto",
+      "use_opencv": true,
+      "use_pyzbar": true,
+      "use_zxing": true,
+
+      // backward-compatibility aliases (optional):
       "use_pyzbar_fallback": true,
       "use_zxingcpp": true
     }
@@ -109,13 +114,42 @@ See `.env.example`:
       - denoise: light Gaussian blur to reduce noise
     - Decoder selection:
       - decoder_backend: "opencv" | "pyzbar" | "zxing" | "auto" (default "auto").
-        - "opencv": uses OpenCV QRCodeDetector only.
+        - "opencv": uses OpenCV QRCodeDetector.
         - "pyzbar": uses pyzbar (requires system libzbar).
-        - "zxing": uses ZXing-C++ (requires zxing-cpp Python bindings via `pip install zxing-cpp` or `pip install zxing-cpp-python`).
-        - "auto": tries OpenCV, then ZXing-C++ via `decode_zxing(...)` (if enabled and installed), then pyzbar (if enabled).
-      - use_zxingcpp: when true (default) and backend is "auto", attempt ZXing-C++ if bindings are available; ignored when not installed.
-      - use_pyzbar_fallback: when true (default) and backend is "auto", attempt pyzbar after other decoders.
+        - "zxing": uses ZXing-C++ (requires zxing-cpp Python bindings).
+        - "auto": tries enabled backends in order: OpenCV → ZXing → pyzbar.
+      - Explicit backend flags (all default true):
+        - use_opencv: enable/disable OpenCV path
+        - use_pyzbar: enable/disable pyzbar path
+        - use_zxing: enable/disable ZXing path
+      - Back-compatibility:
+        - use_pyzbar_fallback maps to use_pyzbar when decoder_backend="auto"
+        - use_zxingcpp maps to use_zxing
     - All preprocessing options default to false to preserve previous behavior.
+
+Examples:
+- Force OpenCV only:
+  {
+    "url": "https://example.com/video.mp4",
+    "decoder_backend": "opencv",
+    "use_opencv": true,
+    "use_pyzbar": false,
+    "use_zxing": false
+  }
+
+- Auto with ZXing disabled:
+  {
+    "url": "https://example.com/video.mp4",
+    "decoder_backend": "auto",
+    "use_zxing": false
+  }
+
+- Prefer ZXing explicitly:
+  {
+    "url": "https://example.com/video.mp4",
+    "decoder_backend": "zxing",
+    "use_zxing": true
+  }
 
 ### ZXing-C++ caveats
 - ZXing bindings may not be available for all OS/architecture/Python combos. If import fails, the server continues without ZXing and logs nothing; the "auto" path just skips that step.
