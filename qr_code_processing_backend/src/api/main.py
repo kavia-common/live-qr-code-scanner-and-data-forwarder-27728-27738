@@ -25,24 +25,22 @@ except Exception:  # pragma: no cover
 #  - zxing-cpp-python (community build)
 # We try both imports in order. If neither is present or fails to load, we set flag False.
 _ZXING_AVAILABLE = False
+zxingcpp_read_barcode = None  # type: ignore[assignment]
 try:
-    # Official binding attempt
-    from zxingcpp import read_barcode as zxingcpp_read_barcode  # type: ignore
+    # Preferred: official binding (module name: zxingcpp)
+    from zxingcpp import read_barcode as _zxingcpp_read_barcode  # type: ignore
+    zxingcpp_read_barcode = _zxingcpp_read_barcode
     _ZXING_AVAILABLE = True
 except Exception:  # pragma: no cover
     try:
-        # Community binding attempt
-        # Some distributions expose a similar API under zxingcpp as well,
-        # but others under a 'zxing' or 'zxingcpp_python' module. We try a compatible alias.
-        from zxingcpp import read_barcode as zxingcpp_read_barcode  # type: ignore
+        # Some community wheels expose similar API under the same module name when the package
+        # name differs (zxing-cpp-python). The import above already tried that.
+        from zxingcpp import read_barcode as _zxingcpp_read_barcode  # type: ignore
+        zxingcpp_read_barcode = _zxingcpp_read_barcode
         _ZXING_AVAILABLE = True
     except Exception:  # pragma: no cover
-        # As a last resort, try the community package's top-level name if it exposes similar API
-        try:
-            # Many wheels still use 'zxingcpp' even when package name differs, so nothing else to do here.
-            _ZXING_AVAILABLE = False
-        except Exception:  # pragma: no cover
-            _ZXING_AVAILABLE = False
+        # ZXing not available. Leave flag False and helper will noop.
+        _ZXING_AVAILABLE = False
 
 # Load environment variables from .env if present
 load_dotenv()
@@ -358,6 +356,39 @@ class QRScannerService:
 SCANNER = QRScannerService()
 
 
+# PUBLIC_INTERFACE
+def decode_zxing(image) -> Optional[str]:
+    """Attempt to decode a barcode/QR using ZXing-C++ Python bindings.
+
+    Returns the decoded text if successful; otherwise None.
+    The function is a safe no-op if ZXing bindings are not installed.
+
+    Parameters:
+    - image: NumPy array (BGR or grayscale). Preprocessing can be applied by caller.
+
+    Notes:
+    - The project prefers the official 'zxing-cpp' wheels where available.
+    - On platforms without wheels, 'zxing-cpp-python' may be used alternatively.
+    """
+    if not _ZXING_AVAILABLE or zxingcpp_read_barcode is None:
+        return None
+    try:
+        result = zxingcpp_read_barcode(image)  # type: ignore[misc]
+        if result is None:
+            return None
+        # Normalize return (single result or list)
+        if isinstance(result, list):
+            for r in result:
+                text = getattr(r, "text", None) or getattr(r, "decoded_text", None)
+                if text:
+                    return str(text)
+            return None
+        text = getattr(result, "text", None) or getattr(result, "decoded_text", None)
+        return str(text) if text else None
+    except Exception:
+        return None
+
+
 def _detect_qr_from_video_file(
     path: str,
     max_frames: int = 1500,
@@ -427,24 +458,9 @@ def _detect_qr_from_video_file(
         - zxingcpp.read_barcode typically accepts a NumPy array (BGR or gray).
         - We return the 'text' of the first decoded symbol if available.
         """
-        if not _ZXING_AVAILABLE or not use_zxingcpp:
+        if not use_zxingcpp:
             return None
-        try:
-            # Most bindings autodetect format; pass the frame/processed image as is.
-            result = zxingcpp_read_barcode(img)  # type: ignore[name-defined]
-            if result is None:
-                return None
-            # Some bindings return a single result or a list; normalize
-            if isinstance(result, list):
-                for r in result:
-                    text = getattr(r, "text", None) or getattr(r, "decoded_text", None)
-                    if text:
-                        return str(text)
-                return None
-            text = getattr(result, "text", None) or getattr(result, "decoded_text", None)
-            return str(text) if text else None
-        except Exception:
-            return None
+        return decode_zxing(img)
 
     try:
         frame_idx = 0

@@ -21,13 +21,18 @@ Theme: Ocean Professional (blue & amber accents, modern, clean, minimalist)
 - A local webcam (or virtual camera device)
 - Internet access for calling external API and webhook (default: httpbin.org)
 - For pyzbar decoder (optional): system library libzbar must be installed (e.g., Debian/Ubuntu: `sudo apt-get update && sudo apt-get install -y libzbar0`)
-- For ZXing-C++ decoder (optional): Python bindings for zxing-cpp must be installed. We prefer the official `zxing-cpp` package when wheels are available for your platform. If not available, try `zxing-cpp-python`.
+- For ZXing-C++ decoder (optional): Python bindings for zxing-cpp must be installed. We prefer the official `zxing-cpp` package when wheels are available for your platform. If not available, try `zxing-cpp-python`. The code includes a helper `decode_zxing(image)` that safely no-ops when bindings are not present.
 
 ### ZXing-C++ installation notes
 
-- Preferred: `pip install zxing-cpp` (official bindings). Check PyPI for supported platforms/wheels.
-- Alternative (if the above has no wheel for your platform): `pip install zxing-cpp-python`
-- If neither provides a wheel for your OS/arch/Python version, compilation from source may be required (not covered here). In such cases, keep `use_zxingcpp=false` or select a different decoder.
+- Preferred (when wheels available):
+  - `pip install zxing-cpp`
+- Alternative (if no official wheels for your OS/arch/Python version):
+  - `pip install zxing-cpp-python`
+- If neither provides a wheel for your environment, building from source may be required (not covered here). In such cases, keep `use_zxingcpp=false` or select a different decoder backend.
+- Platform caveats:
+  - Some environments (e.g., ARM, Alpine/musl, older Python) may lack prebuilt wheels. The API gracefully skips ZXing if import fails.
+  - No additional system libraries are typically required for zxing-cpp wheels. If building from source, consult the zxing-cpp project for prerequisites.
 
 Both ZXing-C++ bindings are optional at runtime. The API will silently skip ZXing if the module is not present.
 
@@ -106,9 +111,9 @@ See `.env.example`:
       - decoder_backend: "opencv" | "pyzbar" | "zxing" | "auto" (default "auto").
         - "opencv": uses OpenCV QRCodeDetector only.
         - "pyzbar": uses pyzbar (requires system libzbar).
-        - "zxing": uses ZXing-C++ (requires zxing-cpp Python bindings).
-        - "auto": tries OpenCV, then ZXing-C++ (if enabled and installed), then pyzbar (if enabled).
-      - use_zxingcpp: when true (default) and backend is "auto", attempt ZXing-C++ if bindings are available.
+        - "zxing": uses ZXing-C++ (requires zxing-cpp Python bindings via `pip install zxing-cpp` or `pip install zxing-cpp-python`).
+        - "auto": tries OpenCV, then ZXing-C++ via `decode_zxing(...)` (if enabled and installed), then pyzbar (if enabled).
+      - use_zxingcpp: when true (default) and backend is "auto", attempt ZXing-C++ if bindings are available; ignored when not installed.
       - use_pyzbar_fallback: when true (default) and backend is "auto", attempt pyzbar after other decoders.
     - All preprocessing options default to false to preserve previous behavior.
 
