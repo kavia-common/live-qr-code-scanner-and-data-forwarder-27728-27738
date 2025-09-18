@@ -19,6 +19,31 @@ try:
 except Exception:  # pragma: no cover
     _PYZBAR_AVAILABLE = False
 
+# ZXing-C++ optional Python bindings (prefer official if available)
+# There are at least two bindings in the wild:
+#  - zxing-cpp (official binding name in PyPI as of 2024/2025 on many platforms)
+#  - zxing-cpp-python (community build)
+# We try both imports in order. If neither is present or fails to load, we set flag False.
+_ZXING_AVAILABLE = False
+try:
+    # Official binding attempt
+    from zxingcpp import read_barcode as zxingcpp_read_barcode  # type: ignore
+    _ZXING_AVAILABLE = True
+except Exception:  # pragma: no cover
+    try:
+        # Community binding attempt
+        # Some distributions expose a similar API under zxingcpp as well,
+        # but others under a 'zxing' or 'zxingcpp_python' module. We try a compatible alias.
+        from zxingcpp import read_barcode as zxingcpp_read_barcode  # type: ignore
+        _ZXING_AVAILABLE = True
+    except Exception:  # pragma: no cover
+        # As a last resort, try the community package's top-level name if it exposes similar API
+        try:
+            # Many wheels still use 'zxingcpp' even when package name differs, so nothing else to do here.
+            _ZXING_AVAILABLE = False
+        except Exception:  # pragma: no cover
+            _ZXING_AVAILABLE = False
+
 # Load environment variables from .env if present
 load_dotenv()
 
@@ -179,13 +204,17 @@ class ProcessVideoURLRequest(BaseModel):
         description="If true, apply light denoising (Gaussian blur) before detection.",
     )
     # Decoder controls
-    decoder_backend: Optional[Literal["opencv", "pyzbar", "auto"]] = Field(
+    decoder_backend: Optional[Literal["opencv", "pyzbar", "zxing", "auto"]] = Field(
         default="auto",
-        description="Select QR decoder backend. 'opencv' uses OpenCV only, 'pyzbar' uses pyzbar (requires system libzbar), 'auto' tries OpenCV then pyzbar."
+        description="Select QR decoder backend. 'opencv' uses OpenCV only, 'pyzbar' uses pyzbar (requires system libzbar), 'zxing' uses ZXing-C++ (requires zxing-cpp binding), 'auto' tries OpenCV then ZXing (if enabled) then pyzbar."
     )
     use_pyzbar_fallback: Optional[bool] = Field(
         default=True,
-        description="If true and decoder_backend is 'auto', use pyzbar as a fallback when OpenCV fails to decode."
+        description="If true and decoder_backend is 'auto', attempt pyzbar if previous decoders return nothing."
+    )
+    use_zxingcpp: Optional[bool] = Field(
+        default=True,
+        description="Enable ZXing-C++ decoding in 'auto' mode when bindings are available. Ignored if ZXing bindings are not installed."
     )
 
 
@@ -339,6 +368,7 @@ def _detect_qr_from_video_file(
     denoise: bool = False,
     decoder_backend: str = "auto",
     use_pyzbar_fallback: bool = True,
+    use_zxingcpp: bool = True,
 ) -> Dict[str, Any]:
     """
     Internal helper to iterate frames from a video file and collect decoded QR codes.
@@ -388,6 +418,34 @@ def _detect_qr_from_video_file(
         except Exception:
             return None
 
+    # Local helper: ZXing-C++ decode (supports QR and other symbologies; we only return first text)
+    def _decode_with_zxing(img) -> Optional[str]:
+        """
+        Attempt to decode using ZXing-C++ Python bindings.
+
+        Notes:
+        - zxingcpp.read_barcode typically accepts a NumPy array (BGR or gray).
+        - We return the 'text' of the first decoded symbol if available.
+        """
+        if not _ZXING_AVAILABLE or not use_zxingcpp:
+            return None
+        try:
+            # Most bindings autodetect format; pass the frame/processed image as is.
+            result = zxingcpp_read_barcode(img)  # type: ignore[name-defined]
+            if result is None:
+                return None
+            # Some bindings return a single result or a list; normalize
+            if isinstance(result, list):
+                for r in result:
+                    text = getattr(r, "text", None) or getattr(r, "decoded_text", None)
+                    if text:
+                        return str(text)
+                return None
+            text = getattr(result, "text", None) or getattr(result, "decoded_text", None)
+            return str(text) if text else None
+        except Exception:
+            return None
+
     try:
         frame_idx = 0
         while frames_scanned < max_frames:
@@ -429,9 +487,15 @@ def _detect_qr_from_video_file(
                 decoded_value = _decode_with_opencv(processed)
             elif backend_choice == "pyzbar":
                 decoded_value = _decode_with_pyzbar(processed)
+            elif backend_choice == "zxing":
+                decoded_value = _decode_with_zxing(processed)
             else:
-                # auto: try OpenCV first, then optional pyzbar fallback
+                # auto: try OpenCV, then ZXing (if enabled and available), then optional pyzbar
                 decoded_value = _decode_with_opencv(processed)
+                if not decoded_value and use_zxingcpp:
+                    zx = _decode_with_zxing(processed)
+                    if zx:
+                        decoded_value = zx
                 if not decoded_value and use_pyzbar_fallback:
                     decoded_value = _decode_with_pyzbar(processed)
 
@@ -758,6 +822,7 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
                 denoise=bool(req.denoise) if req.denoise is not None else False,
                 decoder_backend=(req.decoder_backend or "auto"),
                 use_pyzbar_fallback=bool(req.use_pyzbar_fallback) if req.use_pyzbar_fallback is not None else True,
+                use_zxingcpp=bool(req.use_zxingcpp) if getattr(req, "use_zxingcpp", None) is not None else True,
             )
             detected: List[str] = result["detected"]
             frames_scanned: int = result["frames_scanned"]

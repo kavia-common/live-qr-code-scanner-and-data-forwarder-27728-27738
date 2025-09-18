@@ -13,3 +13,4 @@ Docs: http://localhost:8000/docs
 New:
 - POST /process_youtube — Provide a YouTube URL to scan frames for QR codes without a webcam.
 - POST /process_video — Provide a direct video URL (e.g., .mp4) to scan frames for QR codes without a webcam. Dropbox share links are auto-rewritten to direct download (dl=1) for convenience.
+- Optional ZXing-C++ decoder (zxing-cpp) support added as explicit backend or "auto" fallback in /process_video. See backend README for install notes.

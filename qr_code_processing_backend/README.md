@@ -21,6 +21,15 @@ Theme: Ocean Professional (blue & amber accents, modern, clean, minimalist)
 - A local webcam (or virtual camera device)
 - Internet access for calling external API and webhook (default: httpbin.org)
 - For pyzbar decoder (optional): system library libzbar must be installed (e.g., Debian/Ubuntu: `sudo apt-get update && sudo apt-get install -y libzbar0`)
+- For ZXing-C++ decoder (optional): Python bindings for zxing-cpp must be installed. We prefer the official `zxing-cpp` package when wheels are available for your platform. If not available, try `zxing-cpp-python`.
+
+### ZXing-C++ installation notes
+
+- Preferred: `pip install zxing-cpp` (official bindings). Check PyPI for supported platforms/wheels.
+- Alternative (if the above has no wheel for your platform): `pip install zxing-cpp-python`
+- If neither provides a wheel for your OS/arch/Python version, compilation from source may be required (not covered here). In such cases, keep `use_zxingcpp=false` or select a different decoder.
+
+Both ZXing-C++ bindings are optional at runtime. The API will silently skip ZXing if the module is not present.
 
 ## Setup
 
@@ -81,7 +90,8 @@ See `.env.example`:
       "adaptive_threshold": false,
       "denoise": false,
       "decoder_backend": "auto",
-      "use_pyzbar_fallback": true
+      "use_pyzbar_fallback": true,
+      "use_zxingcpp": true
     }
   - returns: { "message": "...", "detected": ["QR1", "QR2"], "frames_scanned": 123 }
   - notes:
@@ -93,9 +103,18 @@ See `.env.example`:
       - adaptive_threshold: increase contrast via adaptive thresholding (applies after grayscale)
       - denoise: light Gaussian blur to reduce noise
     - Decoder selection:
-      - decoder_backend: "opencv" | "pyzbar" | "auto" (default "auto"). "auto" tries OpenCV first, then pyzbar if enabled.
-      - use_pyzbar_fallback: when true and backend is "auto", attempt pyzbar if OpenCV returns nothing.
+      - decoder_backend: "opencv" | "pyzbar" | "zxing" | "auto" (default "auto").
+        - "opencv": uses OpenCV QRCodeDetector only.
+        - "pyzbar": uses pyzbar (requires system libzbar).
+        - "zxing": uses ZXing-C++ (requires zxing-cpp Python bindings).
+        - "auto": tries OpenCV, then ZXing-C++ (if enabled and installed), then pyzbar (if enabled).
+      - use_zxingcpp: when true (default) and backend is "auto", attempt ZXing-C++ if bindings are available.
+      - use_pyzbar_fallback: when true (default) and backend is "auto", attempt pyzbar after other decoders.
     - All preprocessing options default to false to preserve previous behavior.
+
+### ZXing-C++ caveats
+- ZXing bindings may not be available for all OS/architecture/Python combos. If import fails, the server continues without ZXing and logs nothing; the "auto" path just skips that step.
+- When forcing `decoder_backend="zxing"` and ZXing is not installed, no decoding will occur (returns empty). Prefer `auto` with `use_zxingcpp=true` for portability.
 
 ### Processing Pipeline
 

@@ -22,6 +22,11 @@ opencv-python==4.10.0.84
 pytube==15.0.0
 numpy==2.1.2
 pyzbar==0.1.9
+# ZXing-C++ Python bindings (optional at runtime; install available wheels)
+# Prefer official package if environment supports wheels:
+zxing-cpp==2.2.0
+# If the above has no wheels for your platform, alternatively:
+# zxing-cpp-python==2.0.0
 packaging==24.2
 pluggy==1.5.0
 pycodestyle==2.13.0
