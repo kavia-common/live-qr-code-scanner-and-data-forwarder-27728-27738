@@ -1,10 +1,13 @@
 import os
 import threading
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import cv2  # type: ignore
 import httpx
+import tempfile
+import os as _os
+from pytube import YouTube  # type: ignore
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -122,6 +125,32 @@ class ProcessQRResponse(BaseModel):
 
 class ConfigResponse(BaseModel):
     config: ServiceConfig = Field(..., description="Current service configuration.")
+
+
+class ProcessYouTubeRequest(BaseModel):
+    """Request body for processing QR codes from a YouTube video URL."""
+    url: HttpUrl = Field(..., description="YouTube video URL to analyze for QR codes.")
+    max_frames: Optional[int] = Field(
+        default=1500,
+        ge=1,
+        description="Maximum number of frames to scan before stopping (safety guard).",
+    )
+    frame_stride: Optional[int] = Field(
+        default=5,
+        ge=1,
+        description="Analyze every Nth frame to reduce processing cost.",
+    )
+    stop_after_first: Optional[bool] = Field(
+        default=True,
+        description="If true, stop after detecting the first QR code.",
+    )
+
+
+class ProcessYouTubeResponse(BaseModel):
+    """Response containing any decoded QR payloads found in the YouTube video."""
+    message: str = Field(..., description="Summary message.")
+    detected: List[str] = Field(default_factory=list, description="List of unique decoded QR strings detected.")
+    frames_scanned: int = Field(..., description="Number of frames scanned.")
 
 class UpdateConfigRequest(BaseModel):
     external_api_url: Optional[HttpUrl] = Field(default=None, description="External API endpoint.")
@@ -256,6 +285,48 @@ class QRScannerService:
 
 SCANNER = QRScannerService()
 
+
+def _detect_qr_from_video_file(path: str, max_frames: int = 1500, frame_stride: int = 5, stop_after_first: bool = True) -> Dict[str, Any]:
+    """
+    Internal helper to iterate frames from a video file and collect decoded QR codes.
+
+    Returns a dict with:
+    - detected: List[str] of unique decoded values
+    - frames_scanned: int
+    """
+    detected: List[str] = []
+    frames_scanned = 0
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise RuntimeError("Unable to open downloaded/streamed video with OpenCV")
+
+    detector = cv2.QRCodeDetector()
+
+    try:
+        frame_idx = 0
+        while frames_scanned < max_frames:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            # stride sampling
+            if frame_idx % max(1, frame_stride) != 0:
+                frame_idx += 1
+                continue
+
+            frames_scanned += 1
+            frame_idx += 1
+
+            data, points, _ = detector.detectAndDecode(frame)
+            if data:
+                if data not in detected:
+                    detected.append(data)
+                if stop_after_first:
+                    break
+    finally:
+        cap.release()
+
+    return {"detected": detected, "frames_scanned": frames_scanned}
+
 # -----------------------
 # Routes
 # -----------------------
@@ -388,6 +459,67 @@ def process_qr(req: ProcessQRRequest) -> ProcessQRResponse:
         raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
     finally:
         client.close()
+
+
+# PUBLIC_INTERFACE
+@app.post(
+    "/process_youtube",
+    tags=["demo"],
+    summary="Process QR codes from a YouTube video URL",
+    description=(
+        "Accepts a YouTube video URL, downloads a stream using pytube, extracts frames with OpenCV, "
+        "detects QR codes, and returns any decoded data found. "
+        "Notes: Large/long videos will be sampled by frame_stride; processing is CPU intensive."
+    ),
+    response_model=ProcessYouTubeResponse,
+)
+def process_youtube_video(req: ProcessYouTubeRequest) -> ProcessYouTubeResponse:
+    """
+    Download or stream a YouTube video and scan frames for QR codes.
+
+    Parameters:
+    - url: YouTube video URL
+    - max_frames: Max frames to scan (safety bound)
+    - frame_stride: Analyze every Nth frame
+    - stop_after_first: Stop when first QR is found
+
+    Returns:
+    - Message and a list of unique decoded QR strings along with frames scanned.
+    """
+    # Download the video to a temporary file using pytube
+    try:
+        yt = YouTube(str(req.url))
+        # Get progressive stream with video+audio, lowest resolution is fine for QR detection
+        stream = yt.streams.filter(progressive=True, file_extension="mp4").order_by("resolution").first()
+        if stream is None:
+            # Fallback: try any mp4 stream
+            stream = yt.streams.filter(file_extension="mp4").first()
+        if stream is None:
+            raise HTTPException(status_code=400, detail="No suitable MP4 stream found for this YouTube video.")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_path = _os.path.join(tmpdir, "video.mp4")
+            stream.download(output_path=tmpdir, filename="video.mp4")
+
+            result = _detect_qr_from_video_file(
+                target_path,
+                max_frames=req.max_frames or 1500,
+                frame_stride=req.frame_stride or 5,
+                stop_after_first=req.stop_after_first if req.stop_after_first is not None else True,
+            )
+            detected: List[str] = result["detected"]
+            frames_scanned: int = result["frames_scanned"]
+
+            return ProcessYouTubeResponse(
+                message="Scan complete" if detected else "No QR codes detected",
+                detected=detected,
+                frames_scanned=frames_scanned,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Provide a clear error context
+        raise HTTPException(status_code=500, detail=f"Failed to process YouTube video: {exc}") from exc
 
 # PUBLIC_INTERFACE
 @app.get(

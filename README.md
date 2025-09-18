@@ -9,3 +9,6 @@ Quick start:
 - uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 Docs: http://localhost:8000/docs
+
+New:
+- POST /process_youtube — Provide a YouTube URL to scan frames for QR codes without a webcam.

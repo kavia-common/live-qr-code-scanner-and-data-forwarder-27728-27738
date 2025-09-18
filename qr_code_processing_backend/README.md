@@ -60,6 +60,15 @@ See `.env.example`:
   - body: { "data": "..." }
 - GET `/config` — Get current config
 - PATCH `/config` — Update config fields at runtime
+- POST `/process_youtube` — Process QR codes from a YouTube video URL
+  - body:
+    {
+      "url": "https://www.youtube.com/watch?v=...",
+      "max_frames": 1500,
+      "frame_stride": 5,
+      "stop_after_first": true
+    }
+  - returns: { "message": "...", "detected": ["QR1", "QR2"], "frames_scanned": 123 }
 
 ### Processing Pipeline
 
