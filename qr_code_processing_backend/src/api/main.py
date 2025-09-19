@@ -208,15 +208,15 @@ class ProcessVideoURLRequest(BaseModel):
     )
     # New explicit backend flags exposed to the API request
     use_opencv: Optional[bool] = Field(
-        default=True,
+        default=None,
         description="If true, allow OpenCV QRCodeDetector decoding. In 'auto' mode this is attempted first."
     )
     use_pyzbar: Optional[bool] = Field(
-        default=True,
+        default=None,
         description="If true, allow pyzbar decoding. In 'auto' mode this is attempted after others when enabled."
     )
     use_zxing: Optional[bool] = Field(
-        default=True,
+        default=None,
         description="If true, allow ZXing-C++ decoding. In 'auto' mode this is attempted after OpenCV when bindings are available."
     )
     # Backward-compatibility aliases (kept for now; will be mapped to the above)
