@@ -881,14 +881,14 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
 
             if backend_choice == "auto":
                 # Only consult aliases when the main flags are omitted (None).
-                # Do not coerce to bool yet; propagate None unless we must pick a default.
+                # If alias is also None, we'll default to True later.
                 if use_pyzbar_opt is None:
-                    use_pyzbar_opt = req.use_pyzbar_fallback  # may be True/False/None
+                    use_pyzbar_opt = req.use_pyzbar_fallback  # keep None/True/False as-is
                 if use_zxing_opt is None:
-                    # getattr for safety although field exists
-                    use_zxing_opt = getattr(req, "use_zxingcpp", None)
+                    use_zxing_opt = req.use_zxingcpp  # keep None/True/False as-is
 
-            # Apply final defaults only at the call site: default True when still None.
+            # Apply final defaults only if both primary and alias were None: default to True.
+            # The final values passed must be bool(opt) to ensure proper typing.
             use_opencv_flag = True if use_opencv_opt is None else bool(use_opencv_opt)
             use_pyzbar_flag = True if use_pyzbar_opt is None else bool(use_pyzbar_opt)
             use_zxing_flag = True if use_zxing_opt is None else bool(use_zxing_opt)
@@ -902,9 +902,9 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
                 adaptive_threshold=bool(req.adaptive_threshold) if req.adaptive_threshold is not None else False,
                 denoise=bool(req.denoise) if req.denoise is not None else False,
                 decoder_backend=(req.decoder_backend or "auto"),
-                use_opencv=use_opencv_flag,
-                use_pyzbar=use_pyzbar_flag,
-                use_zxing=use_zxing_flag,
+                use_opencv=bool(use_opencv_flag),
+                use_pyzbar=bool(use_pyzbar_flag),
+                use_zxing=bool(use_zxing_flag),
             )
             detected: List[str] = result["detected"]
             frames_scanned: int = result["frames_scanned"]
