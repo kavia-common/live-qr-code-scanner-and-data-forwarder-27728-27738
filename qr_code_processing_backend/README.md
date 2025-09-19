@@ -53,7 +53,24 @@ Both ZXing-C++ bindings are optional at runtime. The API will silently skip ZXin
 4. Run the server:
    - uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
-Docs available at: http://localhost:8000/docs (Ocean Professional themed)
+Docs available at: http://localhost:0.0.0.0:8000/docs (Ocean Professional themed)
+
+## Running Tests
+
+This project uses pytest. Most tests mock external HTTP calls, YouTube downloads, OpenCV video capture, and ZXing/pyzbar, so no camera or internet access is required.
+
+- From this directory:
+
+  - Run once:
+    - pip install -r requirements.txt
+
+  - Execute tests in non-interactive CI mode:
+    - pytest -q
+    - Or: CI=true pytest -q
+
+Notes:
+- ZXing-C++ and pyzbar bindings are optional. Tests that cover ZXing/pyzbar paths mock their behavior, so missing system libraries will not cause failures.
+- The scanner background thread is not started in tests; endpoints are tested with mocks to ensure isolation.
 
 ## Environment Variables
 
