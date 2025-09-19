@@ -871,25 +871,27 @@ def process_video_url(req: ProcessVideoURLRequest) -> ProcessVideoURLResponse:
         path, tmpctx = _download_video_to_temp(str(req.url))
         try:
             # Backward-compatibility mapping:
-            # In 'auto' mode only, if primary flags are not provided, use alias values.
+            # In 'auto' mode only, if primary flags are omitted (None), use alias values.
             backend_choice = (req.decoder_backend or "auto").lower()
-            if backend_choice == "auto":
-                use_pyzbar_flag = (
-                    bool(req.use_pyzbar)
-                    if req.use_pyzbar is not None
-                    else (bool(req.use_pyzbar_fallback) if req.use_pyzbar_fallback is not None else True)
-                )
-                use_zxing_flag = (
-                    bool(req.use_zxing)
-                    if req.use_zxing is not None
-                    else (bool(req.use_zxingcpp) if getattr(req, "use_zxingcpp", None) is not None else True)
-                )
-            else:
-                # For explicit backends, do not consult aliases; use main flags or defaults
-                use_pyzbar_flag = bool(req.use_pyzbar) if req.use_pyzbar is not None else True
-                use_zxing_flag = bool(req.use_zxing) if req.use_zxing is not None else True
 
-            use_opencv_flag = bool(req.use_opencv) if req.use_opencv is not None else True
+            # Start from the request-provided values (may be None)
+            use_opencv_opt = req.use_opencv
+            use_pyzbar_opt = req.use_pyzbar
+            use_zxing_opt = req.use_zxing
+
+            if backend_choice == "auto":
+                # Only consult aliases when the main flags are omitted (None).
+                # Do not coerce to bool yet; propagate None unless we must pick a default.
+                if use_pyzbar_opt is None:
+                    use_pyzbar_opt = req.use_pyzbar_fallback  # may be True/False/None
+                if use_zxing_opt is None:
+                    # getattr for safety although field exists
+                    use_zxing_opt = getattr(req, "use_zxingcpp", None)
+
+            # Apply final defaults only at the call site: default True when still None.
+            use_opencv_flag = True if use_opencv_opt is None else bool(use_opencv_opt)
+            use_pyzbar_flag = True if use_pyzbar_opt is None else bool(use_pyzbar_opt)
+            use_zxing_flag = True if use_zxing_opt is None else bool(use_zxing_opt)
 
             result = _detect_qr_from_video_file(
                 path,
