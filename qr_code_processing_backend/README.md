@@ -46,11 +46,14 @@ Both ZXing-C++ bindings are optional at runtime. The API will silently skip ZXin
    - pip install -r requirements.txt
 
 3. Create a .env file (optional). See .env.example for variables.
+   - cp .env.example .env
+   - Edit EXTERNAL_API_URL and WEBHOOK_URL to point to your services (placeholders default to httpbin.org)
+   - If your external API needs auth, set EXTERNAL_API_KEY
 
 4. Run the server:
    - uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
-Docs available at: http://localhost:8000/docs
+Docs available at: http://localhost:8000/docs (Ocean Professional themed)
 
 ## Environment Variables
 
